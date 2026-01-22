@@ -1,0 +1,80 @@
+services:
+  # 1. База данных
+  db:
+    image: postgres:15-alpine
+    container_name: delivery_db
+    restart: always
+    environment:
+      POSTGRES_USER: delivery_user
+      POSTGRES_PASSWORD: delivery_pass
+      POSTGRES_DB: delivery_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U delivery_user -d delivery_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis (нужен для Redash)
+  redis:
+    image: redis:7-alpine
+    container_name: delivery_redis
+    restart: always
+
+  # 3. Генератор данных
+  generator:
+    build: .
+    container_name: delivery_generator
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # 4. Jupyter Notebook
+  jupyter:
+    image: jupyter/datascience-notebook:latest
+    container_name: delivery_jupyter
+    restart: always
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+    environment:
+      - JUPYTER_TOKEN=delivery_token
+      - DB_URL=postgresql://delivery_user:delivery_pass@db:5432/delivery_db
+
+  # 5. Redash Server
+  redash-server:
+    image: redash/redash:10.1.0.b50633
+    container_name: redash_server
+    restart: always
+    command: server
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      REDASH_COOKIE_SECRET: "redash_secret_very_long_string"
+      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/delivery_db"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      REDASH_LOG_LEVEL: "INFO"
+
+  # 6. Redash Worker (для выполнения запросов)
+  redash-worker:
+    image: redash/redash:10.1.0.b50633
+    container_name: redash_worker
+    restart: always
+    command: scheduler
+    depends_on:
+      - redash-server
+    environment:
+      REDASH_COOKIE_SECRET: "redash_secret_very_long_string"
+      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/delivery_db"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+
+volumes:
+  postgres_data:
