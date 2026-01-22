@@ -1,3 +1,8 @@
+import logging
+from alembic.config import Config
+from alembic import command
+from pathlib import Path
+
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -28,3 +33,25 @@ async def create_database() -> None:
             print(f"Database {settings.db_base} created.")
 
     await engine.dispose()
+
+
+def run_migrations() -> None:
+    """
+    Run Alembic migrations programmatically.
+    This ensures the DB schema is up-to-date when the container starts.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Running pending migrations...")
+
+    alembic_cfg_path = "alembic.ini"
+    
+    if not Path(alembic_cfg_path).exists():
+        raise FileNotFoundError(f"Alembic config not found at {alembic_cfg_path}")
+
+    try:
+        alembic_cfg = Config(alembic_cfg_path)
+        command.upgrade(alembic_cfg, "head")
+        logger.info("Migrations applied successfully.")
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        raise
