@@ -3,6 +3,7 @@ import random
 import math
 from datetime import datetime, timedelta, timezone
 
+from zoneinfo import ZoneInfo
 from faker import Faker
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,13 +16,9 @@ from delivery_system.db.models.enums import OrderStatus, TransportType
 logger = logging.getLogger(__name__)
 fake = Faker("ru_RU")
 
-MOSCOW_BOUNDS = {
-    "lat_min": 55.55, "lat_max": 55.90,
-    "lon_min": 37.35, "lon_max": 37.85,
-}
-
 
 class OrderMaker:
+
     def __init__(self, session: AsyncSession):
         self.session = session
         self.client_dao = ClientDAO(session)
@@ -29,87 +26,100 @@ class OrderMaker:
         self.order_dao = OrderDAO(session)
 
     def _calculate_distance(self, lat1, lon1, lat2, lon2) -> float:
-        """Rough estimation of distance in KM using Haversine-like formula for short distances."""
-        # 1 deg lat ~ 111 km
-        # 1 deg lon ~ 111 * cos(lat) km
+        """Haversine estimation for Moscow latitudes."""
+        # 1 deg lat ~ 111 km, 1 deg lon ~ 62 km
         d_lat = (lat2 - lat1) * 111.0
-        d_lon = (lon2 - lon1) * 111.0 * 0.56  # cos(55.7) approx 0.56
+        d_lon = (lon2 - lon1) * 62.0 
         return math.sqrt(d_lat**2 + d_lon**2)
 
     def _calculate_price(self, distance_km: float, transport: TransportType) -> float:
-        base_price = 150.0
-        km_price = 30.0
-        price = base_price + (distance_km * km_price)
+        """Dynamic pricing logic."""
+        base = 150.0
         
-        # Наценка за скорость/амортизацию
-        if transport == TransportType.CAR:
-            price *= 1.5
+        # Ставки за км зависят от типа
+        if transport == TransportType.FOOT:
+            rate = 20.0 # Дешевле за км, но расстояние маленькое
         elif transport == TransportType.BICYCLE:
-            price *= 1.1
-            
+            rate = 25.0
+        else:
+            rate = 40.0 # Авто дорогое
+
+        price = base + (distance_km * rate)
+        
+        # Коэффициент сложности
+        if transport == TransportType.CAR: price *= 1.2
+
         return round(price, 2)
 
+    def _generate_pickup_point(self, client_lat: float, client_lon: float, transport: TransportType) -> tuple[float, float]:
+        """
+        Generate a location based on courier capabilities relative to the client.
+        """
+        # 1. Определяем максимальный радиус поиска ресторана (в км)
+        if transport == TransportType.FOOT:
+            min_r, max_r = 0.3, 2.5  # Пеший: от 300м до 2.5км
+        elif transport == TransportType.BICYCLE:
+            min_r, max_r = 1.0, 7.0  # Вело: от 1км до 7км
+        else:
+            min_r, max_r = 3.0, 25.0 # Авто: далеко
+
+        # 2. Генерируем случайное расстояние и угол
+        dist_km = random.uniform(min_r, max_r)
+        angle_rad = random.uniform(0, 2 * math.pi)
+
+        # 3. Переводим км в градусы (смещаем точку от клиента)
+        # d_lat = dist * cos(a) / 111
+        # d_lon = dist * sin(a) / 62
+        delta_lat = (dist_km * math.cos(angle_rad)) / 111.0
+        delta_lon = (dist_km * math.sin(angle_rad)) / 62.0
+
+        return client_lat + delta_lat, client_lon + delta_lon
+
     async def create_random_order(self) -> None:
-        """Creates a single random completed order."""
-        # 1. Получаем участников (ID и метаданные)
         clients = await self.client_dao.get_all_ids()
         couriers = await self.courier_dao.get_all_ids()
 
         if not clients or not couriers:
-            logger.warning("No clients or couriers found. Skipping order generation.")
             return
 
-        # Выбираем случайных
-        client_row = random.choice(clients) # (id, lat, lon)
-        courier_row = random.choice(couriers) # (id, transport_type)
+        # 1. Выбираем Исполнителя и Клиента
+        courier_id, c_transport = random.choice(couriers)
+        client_id, c_lat, c_lon = random.choice(clients)
 
-        client_id, client_lat, client_lon = client_row
-        courier_id, courier_transport = courier_row
-
-        # 2. Генерируем точку старта
-        pickup_lat = random.uniform(MOSCOW_BOUNDS["lat_min"], MOSCOW_BOUNDS["lat_max"])
-        pickup_lon = random.uniform(MOSCOW_BOUNDS["lon_min"], MOSCOW_BOUNDS["lon_max"])
-
-        company_name = fake.company() 
-        pickup_street = fake.street_name()
-        pickup_house = fake.building_number()
-        pickup_address = f"г. Москва, {pickup_street}, д. {pickup_house} ({company_name})"
-
-        # 3. Считаем математику
-        distance = self._calculate_distance(pickup_lat, pickup_lon, client_lat, client_lon)
-        price = self._calculate_price(distance, courier_transport)
-
-        # 4. Считаем время
-        # Средняя скорость: Пеший 5 км/ч, Авто 25 км/ч (пробки)
-        speed = 5
-        if courier_transport == TransportType.BICYCLE:
-            speed = 12
-        if courier_transport == TransportType.CAR:
-            speed = 25
+        # 2. Генерируем адресс
+        p_lat, p_lon = self._generate_pickup_point(c_lat, c_lon, c_transport)
         
-        duration_hours = distance / max(speed, 1)
-        duration_seconds = int(duration_hours * 3600) + random.randint(300, 1200)
+        pickup_address = f"г. Москва, {fake.street_name()}, д. {fake.building_number()} ({fake.company()})"
 
-        finished_at = datetime.now(timezone.utc)
-        created_at = finished_at - timedelta(seconds=duration_seconds)
+        # 3. Фактический расчет дистанции (для точности)
+        dist = self._calculate_distance(p_lat, p_lon, c_lat, c_lon)
+        price = self._calculate_price(dist, c_transport)
 
-        # 5. Собираем модель
+        # 4. Время выполнения
+        speed = {TransportType.FOOT: 4.5, TransportType.BICYCLE: 12.0, TransportType.CAR: 28.0}[c_transport]
+        duration_hours = dist / speed
+        duration_sec = int(duration_hours * 3600) + random.randint(300, 1200) # +5-20 мин на передачу
+        
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        finished_at = datetime.now(moscow_tz)
+        created_at = finished_at - timedelta(seconds=duration_sec)
+
+        # 5. Сохраняем
         order = OrderModel(
             client_id=client_id,
             courier_id=courier_id,
             status=OrderStatus.DELIVERED,
             pickup_address=pickup_address,
-            pickup_lat=pickup_lat,
-            pickup_lon=pickup_lon,
-            delivery_lat=client_lat,
-            delivery_lon=client_lon,
-            distance_km=round(distance, 2),
+            pickup_lat=p_lat,
+            pickup_lon=p_lon,
+            delivery_lat=c_lat,
+            delivery_lon=c_lon,
+            distance_km=round(dist, 2),
             price=price,
             created_at=created_at,
             finished_at=finished_at
         )
-
         await self.order_dao.add(order)
         await self.session.commit()
         
-        logger.info(f"Order created! {courier_transport.value} -> {round(distance, 1)}km | {price} RUB")
+        logger.info(f"Order: {c_transport.value} | {round(dist, 1)}km | {price}RUB")
