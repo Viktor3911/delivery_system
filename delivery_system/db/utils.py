@@ -50,6 +50,7 @@ def run_migrations() -> None:
 
     try:
         alembic_cfg = Config(alembic_cfg_path)
+        alembic_cfg.attributes['configure_logger'] = False
         command.upgrade(alembic_cfg, "head")
         logger.info("Migrations applied successfully.")
     except Exception as e:

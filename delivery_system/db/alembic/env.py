@@ -16,7 +16,7 @@ config = context.config
 
 config.set_main_option("sqlalchemy.url", str(settings.db_url))
 
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.attributes.get('configure_logger', True):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

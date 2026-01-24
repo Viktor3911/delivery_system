@@ -33,20 +33,7 @@ services:
     volumes:
       - .:/app
 
-  # 4. Jupyter Notebook
-  jupyter:
-    image: jupyter/datascience-notebook:latest
-    container_name: delivery_jupyter
-    restart: always
-    ports:
-      - "8888:8888"
-    volumes:
-      - ./notebooks:/home/jovyan/work
-    environment:
-      - JUPYTER_TOKEN=delivery_token
-      - DB_URL=postgresql://delivery_user:delivery_pass@db:5432/delivery_db
-
-  # 5. Redash Server
+  # 4. Redash Server
   redash-server:
     image: redash/redash:10.1.0.b50633
     container_name: redash_server
@@ -65,7 +52,7 @@ services:
       REDASH_REDIS_URL: "redis://redis:6379/0"
       REDASH_LOG_LEVEL: "INFO"
 
-  # 6. Redash Worker (для выполнения запросов)
+  # 5. Redash Worker (для выполнения запросов)
   redash-worker:
     image: redash/redash:10.1.0.b50633
     container_name: redash_worker
