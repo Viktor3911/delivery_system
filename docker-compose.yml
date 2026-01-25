@@ -11,11 +11,15 @@ services:
       TZ: Europe/Moscow
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U delivery_user -d delivery_db"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - analytics_net
 
   # 2. Redis (нужен для Redash)
   redis:
@@ -24,6 +28,8 @@ services:
     restart: always
     environment:
       - TZ=Europe/Moscow
+    networks:
+      - analytics_net
 
   # 3. Генератор данных
   generator:
@@ -37,8 +43,31 @@ services:
       - .:/app
     environment:
       - TZ=Europe/Moscow
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/db_ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - analytics_net
 
-  # 4. Redash Server
+  # 4. Служебный контейнер для разовой настройки БД Redash
+  redash-init:
+    image: redash/redash:10.1.0.b50633
+    command: create_db
+    depends_on:
+      generator:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      REDASH_COOKIE_SECRET: "redash_secret_very_long_string"
+      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/redash_metadata"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+    networks:
+      - analytics_net
+
+  # 5. Redash Server
   redash-server:
     image: redash/redash:10.1.0.b50633
     container_name: redash_server
@@ -47,30 +76,53 @@ services:
     ports:
       - "5000:5000"
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      redash-init:
+        condition: service_completed_successfully
     environment:
       REDASH_COOKIE_SECRET: "redash_secret_very_long_string"
-      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/delivery_db"
+      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/redash_metadata"
       REDASH_REDIS_URL: "redis://redis:6379/0"
       REDASH_LOG_LEVEL: "INFO"
       TZ: Europe/Moscow
+    networks:
+      - analytics_net
 
-  # 5. Redash Worker (для выполнения запросов)
+  # 6. Redash Scheduler
+  redash-scheduler:
+    image: redash/redash:10.1.0.b50633
+    container_name: redash_scheduler
+    command: scheduler
+    depends_on:
+      redash-server:
+        condition: service_started
+    environment:
+      PYTHONUNBUFFERED: 1
+      REDASH_COOKIE_SECRET: "redash_secret_very_long_string"
+      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/redash_metadata"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+    networks:
+      - analytics_net
+
+  # 7. Redash Worker
   redash-worker:
     image: redash/redash:10.1.0.b50633
     container_name: redash_worker
-    restart: always
-    command: scheduler
+    command: worker
     depends_on:
-      - redash-server
+      redash-server:
+        condition: service_started
     environment:
+      PYTHONUNBUFFERED: 1
       REDASH_COOKIE_SECRET: "redash_secret_very_long_string"
-      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/delivery_db"
+      REDASH_DATABASE_URL: "postgresql://delivery_user:delivery_pass@db/redash_metadata"
       REDASH_REDIS_URL: "redis://redis:6379/0"
-      TZ: Europe/Moscow
+      QUEUES: "queries,scheduled_queries,schemas,default"
+    networks:
+      - analytics_net
+
+networks:
+  analytics_net:
+    driver: bridge
 
 volumes:
   postgres_data:

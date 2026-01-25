@@ -1,7 +1,7 @@
 import logging
 import random
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from zoneinfo import ZoneInfo
 from faker import Faker
@@ -86,7 +86,7 @@ class OrderMaker:
         courier_id, c_transport = random.choice(couriers)
         client_id, c_lat, c_lon = random.choice(clients)
 
-        # 2. Генерируем адресс
+        # 2. Генерируем адрес
         p_lat, p_lon = self._generate_pickup_point(c_lat, c_lon, c_transport)
         
         pickup_address = f"г. Москва, {fake.street_name()}, д. {fake.building_number()} ({fake.company()})"

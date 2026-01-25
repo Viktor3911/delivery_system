@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -19,6 +20,9 @@ async def init_infrastructure():
     """Step 1: Create database if not exists."""
     logger.info("Initializing infrastructure...")
     await create_database()
+
+    Path("/tmp/db_ready").touch()
+    logger.info("Databases created, readiness flag set.")
 
 
 async def main_loop():
