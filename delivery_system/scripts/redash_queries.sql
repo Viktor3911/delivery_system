@@ -1,4 +1,4 @@
--- 1. Топ-10 курьеров по заработку (Bar Chart)
+-- 1. Топ-10 курьеров по заработку (Столбачатая диаграмма)
 -- Анализ эффективности персонала: кто приносит больше всего выручки.
 SELECT 
     c.name AS courier_name,
@@ -11,7 +11,7 @@ GROUP BY c.id, c.name, c.transport_type
 ORDER BY total_earned DESC
 LIMIT 10;
 
--- 2. Средний чек и общая выручка по типам транспорта (Столбчатая диаграмма)
+-- 2. Средний чек и общая выручка по типам транспорта (Круговая диаграмма)
 -- Показывает финансовую эффективность каждого вида доставки.
 SELECT 
     c.transport_type,
@@ -22,7 +22,7 @@ JOIN couriers c ON o.courier_id = c.id
 GROUP BY c.transport_type
 ORDER BY total_revenue DESC;
 
--- 3. Средняя дистанция и время доставки (Комбинированный график)
+-- 3. Средняя дистанция и время доставки (Столбачатая диаграмма)
 -- Проверка логики: насколько быстро разные типы транспорта преодолевают расстояние.
 SELECT 
     c.transport_type,
@@ -32,7 +32,7 @@ FROM orders o
 JOIN couriers c ON o.courier_id = c.id
 GROUP BY c.transport_type;
 
--- 4. Топ-10 клиентов по количеству заказов и затратам (Таблица)
+-- 4. Топ-10 клиентов по количеству заказов и затратам (Столбачатая диаграмма)
 -- Анализ лояльности пользователей.
 SELECT 
     cl.name AS client_name,
@@ -47,10 +47,10 @@ LIMIT 10;
 -- 5. География заказов (Карта / Map)
 -- Redash может визуализировать точки на карте Москвы.
 SELECT 
-    pickup_lat, 
-    pickup_lon,
-    delivery_lat,
-    delivery_lon,
+    delivery_lat AS lat,
+    delivery_lon AS lon,
     price
-FROM orders
-WHERE status = 'delivered';
+FROM orders;
+
+-- 6. Количество заказов
+SELECT count(id) AS total_orders FROM orders;
